@@ -7,11 +7,12 @@ This guide details how to compile, package, and install **me_cleaner** from sour
 ## Table of Contents
 
 - [Overview](#overview)
+- [Automated Compilation & Testing (build.sh)](#automated-compilation--testing-buildsh)
 - [Prerequisites & Dependencies](#prerequisites--dependencies)
   - [Fedora / RHEL / CentOS / Fedora Asahi Remix](#fedora--rhel--centos--fedora-asahi-remix)
   - [Debian / Ubuntu](#debian--ubuntu)
   - [Arch Linux](#arch-linux)
-- [Building the RPM Package (Fedora / RHEL)](#building-the-rpm-package-fedora--rhel)
+- [Manual RPM Build Process](#manual-rpm-build-process)
   - [1. Prepare the RPM Build Directory Structure](#1-prepare-the-rpm-build-directory-structure)
   - [2. Generate the Source Tarball](#2-generate-the-source-tarball)
   - [3. Place the RPM Spec File](#3-place-the-rpm-spec-file)
@@ -36,6 +37,46 @@ Our RPM packaging includes:
 - Standard Python egg/dist metadata in `/usr/lib/python3.*/site-packages/`
 - Man pages (`me_cleaner.1.gz` and `me_cleaner.py.1.gz`) in `/usr/share/man/man1/`
 - License (`COPYING`) and documentation (`README.md`)
+
+---
+
+## Automated Compilation & Testing (build.sh)
+
+A turnkey build and test automation script `build.sh` is provided in the repository. It automatically handles source tarball creation, RPM compilation, and end-to-end verification tests.
+
+### Quick Start
+
+Simply run:
+
+```bash
+chmod +x build.sh
+./build.sh
+```
+
+This single command will:
+1. Validate required build tools (`rpmbuild`, `python3`, `git`, `tar`, `rpm2cpio`, `cpio`).
+2. Generate the source tarball `me_cleaner-1.2.tar.gz` and place it in `~/rpmbuild/SOURCES/`.
+3. Compile both binary RPM (`.noarch.rpm`) and source RPM (`.src.rpm`).
+4. Perform automated verification tests:
+   - Queries and validates RPM metadata (`rpm -qip`).
+   - Verifies the file manifest for `/usr/bin/me_cleaner`, `/usr/bin/me_cleaner.py`, and man pages.
+   - Extracts the package to an isolated sandbox and executes `me_cleaner --version`, `me_cleaner.py --version`, and `me_cleaner --help`.
+   - Checks python3 shebang correctness.
+5. Display the path to the ready-to-install RPM and the installation command.
+
+### Available Options
+
+```text
+Usage: build.sh [OPTIONS]
+
+Options:
+  -r, --rpm          Build RPM package (default: true)
+  -w, --wheel        Build Python wheel package (default: false)
+  -t, --test         Run verification tests on built artifacts (default: true)
+  --no-test          Skip artifact verification tests
+  -c, --clean        Clean build directories and temporary files
+  -h, --help         Show this help message and exit
+```
 
 ---
 
@@ -78,7 +119,7 @@ sudo pacman -S --needed \
 
 ---
 
-## Building the RPM Package (Fedora / RHEL)
+## Manual RPM Build Process
 
 Follow these steps to produce an installable `.rpm` and source `.src.rpm`:
 

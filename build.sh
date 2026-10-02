@@ -1,0 +1,259 @@
+#!/usr/bin/env bash
+#
+# build.sh - Build and test automation script for me_cleaner
+# Automates source archiving, RPM compilation, and artifact verification.
+#
+
+set -euo pipefail
+
+# Text formatting
+BOLD="\033[1m"
+GREEN="\033[0;32m"
+BLUE="\033[0;34m"
+YELLOW="\033[0;33m"
+RED="\033[0;31m"
+NC="\033[0m" # No Color
+
+info() {
+    echo -e "${BLUE}${BOLD}[INFO]${NC} $*"
+}
+
+success() {
+    echo -e "${GREEN}${BOLD}[SUCCESS]${NC} $*"
+}
+
+warn() {
+    echo -e "${YELLOW}${BOLD}[WARNING]${NC} $*"
+}
+
+error() {
+    echo -e "${RED}${BOLD}[ERROR]${NC} $*" >&2
+}
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SPEC_FILE="${SCRIPT_DIR}/me_cleaner.spec"
+RPMBUILD_DIR="${HOME}/rpmbuild"
+
+# Flags
+DO_RPM=true
+DO_WHEEL=false
+DO_TEST=true
+DO_CLEAN=false
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Automate compilation, packaging, and testing of me_cleaner.
+
+Options:
+  -r, --rpm          Build RPM package (default: true)
+  -w, --wheel        Build Python wheel package (default: false)
+  -t, --test         Run verification tests on built artifacts (default: true)
+  --no-test          Skip artifact verification tests
+  -c, --clean        Clean build directories and temporary files
+  -h, --help         Show this help message and exit
+
+Examples:
+  ./build.sh                  # Build RPM and run tests (standard)
+  ./build.sh --wheel          # Build RPM and Python wheel
+  ./build.sh --clean          # Clean local build directories
+EOF
+}
+
+# Parse CLI arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -r|--rpm)
+            DO_RPM=true
+            shift
+            ;;
+        -w|--wheel)
+            DO_WHEEL=true
+            shift
+            ;;
+        -t|--test)
+            DO_TEST=true
+            shift
+            ;;
+        --no-test)
+            DO_TEST=false
+            shift
+            ;;
+        -c|--clean)
+            DO_CLEAN=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            error "Unknown option: $1"
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+# Perform clean if requested
+if [ "${DO_CLEAN}" = true ]; then
+    info "Cleaning build artifacts in repository..."
+    rm -rf "${SCRIPT_DIR}/build" "${SCRIPT_DIR}/dist" "${SCRIPT_DIR}"/*.egg-info
+    success "Clean completed."
+    exit 0
+fi
+
+# Ensure spec file exists
+if [ ! -f "${SPEC_FILE}" ]; then
+    error "Spec file not found at ${SPEC_FILE}"
+    exit 1
+fi
+
+# Extract package metadata from spec file
+PKG_NAME="$(sed -n 's/^Name:[[:space:]]*//p' "${SPEC_FILE}" | head -n1 | tr -d '[:space:]')"
+PKG_VERSION="$(sed -n 's/^Version:[[:space:]]*//p' "${SPEC_FILE}" | head -n1 | tr -d '[:space:]')"
+
+info "Package: ${BOLD}${PKG_NAME}${NC} (v${PKG_VERSION})"
+
+# Check essential prerequisites
+info "Checking build tools..."
+MISSING_TOOLS=()
+for tool in git rpmbuild tar python3 rpm2cpio cpio; do
+    if ! command -v "${tool}" >/dev/null 2>&1; then
+        MISSING_TOOLS+=("${tool}")
+    fi
+done
+
+if [ ${#MISSING_TOOLS[@]} -ne 0 ]; then
+    error "Missing required build tools: ${MISSING_TOOLS[*]}"
+    error "Please install them via: sudo dnf install -y rpm-build rpmdevtools git tar python3"
+    exit 1
+fi
+
+# 1. Build RPM Package
+if [ "${DO_RPM}" = true ]; then
+    info "Preparing rpmbuild directories in ${RPMBUILD_DIR}..."
+    mkdir -p "${RPMBUILD_DIR}"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+
+    TARBALL_NAME="${PKG_NAME}-${PKG_VERSION}.tar.gz"
+    TARBALL_PATH="${RPMBUILD_DIR}/SOURCES/${TARBALL_NAME}"
+
+    info "Creating source archive: ${TARBALL_PATH}..."
+    git -C "${SCRIPT_DIR}" archive --format=tar.gz --prefix="${PKG_NAME}-${PKG_VERSION}/" HEAD -o "${TARBALL_PATH}"
+
+    info "Copying spec file to ${RPMBUILD_DIR}/SPECS/${PKG_NAME}.spec..."
+    cp -p "${SPEC_FILE}" "${RPMBUILD_DIR}/SPECS/${PKG_NAME}.spec"
+
+    info "Compiling RPM package with rpmbuild..."
+    rpmbuild -ba "${RPMBUILD_DIR}/SPECS/${PKG_NAME}.spec"
+
+    # Locate generated RPMs
+    BUILT_RPM="$(find "${RPMBUILD_DIR}/RPMS" -type f -name "${PKG_NAME}-${PKG_VERSION}-*.rpm" | head -n1)"
+    BUILT_SRPM="$(find "${RPMBUILD_DIR}/SRPMS" -type f -name "${PKG_NAME}-${PKG_VERSION}-*.src.rpm" | head -n1)"
+
+    if [ -z "${BUILT_RPM}" ] || [ ! -f "${BUILT_RPM}" ]; then
+        error "Failed to locate generated binary RPM!"
+        exit 1
+    fi
+
+    success "Binary RPM built successfully: ${BUILT_RPM}"
+    if [ -n "${BUILT_SRPM}" ] && [ -f "${BUILT_SRPM}" ]; then
+        success "Source RPM built successfully: ${BUILT_SRPM}"
+    fi
+fi
+
+# 2. Build Python Wheel (if requested)
+if [ "${DO_WHEEL}" = true ]; then
+    info "Building Python wheel..."
+    python3 -m pip wheel --no-deps --no-build-isolation -w "${SCRIPT_DIR}/dist" "${SCRIPT_DIR}"
+    WHEEL_FILE="$(find "${SCRIPT_DIR}/dist" -type f -name "${PKG_NAME}-${PKG_VERSION}-*.whl" | head -n1)"
+    success "Python wheel built: ${WHEEL_FILE}"
+fi
+
+# 3. Automated Testing and Verification
+if [ "${DO_TEST}" = true ] && [ "${DO_RPM}" = true ]; then
+    info "Running automated verification tests on ${BUILT_RPM}..."
+
+    # Check RPM header info
+    rpm -qip "${BUILT_RPM}" >/dev/null
+    info "RPM metadata queried successfully."
+
+    # Verify file manifest
+    RPM_FILES="$(rpm -qlp "${BUILT_RPM}")"
+    for expected in "/usr/bin/me_cleaner" "/usr/bin/me_cleaner.py" "/usr/share/man/man1/me_cleaner.1.gz"; do
+        if ! echo "${RPM_FILES}" | grep -q "${expected}"; then
+            error "Expected file ${expected} is missing from RPM package!"
+            exit 1
+        fi
+    done
+    info "Package manifest contains all required binaries and documentation."
+
+    # Extract RPM into isolated temp directory for execution testing
+    TEST_TMPDIR="$(mktemp -d -p "${SCRIPT_DIR}" .test_rpm_XXXXXX)"
+    trap 'rm -rf "${TEST_TMPDIR}"' EXIT
+
+    (
+        cd "${TEST_TMPDIR}"
+        rpm2cpio "${BUILT_RPM}" | cpio -idm --quiet
+    )
+
+    # Test me_cleaner binary execution
+    CLI_BIN="${TEST_TMPDIR}/usr/bin/me_cleaner"
+    CLI_PY_BIN="${TEST_TMPDIR}/usr/bin/me_cleaner.py"
+
+    chmod +x "${CLI_BIN}" "${CLI_PY_BIN}"
+
+    # Verify shebang
+    SHEBANG="$(head -n1 "${CLI_PY_BIN}")"
+    if [[ "${SHEBANG}" != *"python3"* ]]; then
+        error "Invalid shebang in ${CLI_PY_BIN}: ${SHEBANG}"
+        exit 1
+    fi
+    info "Shebang verified: ${SHEBANG}"
+
+    # Test version output
+    VERSION_OUT="$("${CLI_BIN}" --version 2>&1)"
+    if [[ "${VERSION_OUT}" != *"${PKG_VERSION}"* ]]; then
+        error "Unexpected version output from me_cleaner: ${VERSION_OUT} (expected ${PKG_VERSION})"
+        exit 1
+    fi
+    info "Verified executable: '${CLI_BIN} --version' -> ${VERSION_OUT}"
+
+    VERSION_PY_OUT="$("${CLI_PY_BIN}" --version 2>&1)"
+    if [[ "${VERSION_PY_OUT}" != *"${PKG_VERSION}"* ]]; then
+        error "Unexpected version output from me_cleaner.py: ${VERSION_PY_OUT}"
+        exit 1
+    fi
+    info "Verified executable: '${CLI_PY_BIN} --version' -> ${VERSION_PY_OUT}"
+
+    # Test help output
+    "${CLI_BIN}" --help >/dev/null
+    info "Verified help screen output (exit code 0)."
+
+    # Clean up test tempdir
+    rm -rf "${TEST_TMPDIR}"
+    trap - EXIT
+
+    success "All automated verification tests passed!"
+fi
+
+# Print final summary
+echo ""
+echo -e "${GREEN}${BOLD}======================================================${NC}"
+echo -e "${GREEN}${BOLD}               BUILD & TEST COMPLETE                  ${NC}"
+echo -e "${GREEN}${BOLD}======================================================${NC}"
+if [ "${DO_RPM}" = true ]; then
+    echo -e "${BOLD}Binary RPM:${NC} ${BUILT_RPM}"
+    if [ -n "${BUILT_SRPM:-}" ]; then
+        echo -e "${BOLD}Source RPM:${NC} ${BUILT_SRPM}"
+    fi
+    echo ""
+    echo -e "${BOLD}To install on your system:${NC}"
+    echo -e "  sudo dnf install ${BUILT_RPM}"
+    echo ""
+    echo -e "${BOLD}To verify installed binary:${NC}"
+    echo -e "  me_cleaner --version"
+    echo -e "  man me_cleaner"
+fi
+echo -e "${GREEN}${BOLD}======================================================${NC}"
