@@ -1,0 +1,19 @@
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Packaging & Build directories
+build/
+dist/
+*.egg-info/
+*.egg
+.test_rpm_*
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# PyInstaller temporary files
+*.spec.bak

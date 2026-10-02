@@ -42,7 +42,7 @@ Our RPM packaging includes:
 
 ## Automated Compilation & Testing (build.sh)
 
-A turnkey build and test automation script `build.sh` is provided in the repository. It automatically handles source tarball creation, RPM compilation, and end-to-end verification tests.
+A turnkey build and test automation script `build.sh` is provided in the repository. It automatically handles source tarball creation, RPM compilation, intelligent package selection by newest timestamp, and end-to-end verification tests.
 
 ### Quick Start
 
@@ -57,12 +57,14 @@ This single command will:
 1. Validate required build tools (`rpmbuild`, `python3`, `git`, `tar`, `rpm2cpio`, `cpio`).
 2. Generate the source tarball `me_cleaner-1.2.tar.gz` and place it in `~/rpmbuild/SOURCES/`.
 3. Compile both binary RPM (`.noarch.rpm`) and source RPM (`.src.rpm`).
-4. Perform automated verification tests:
+4. **Select by Newest Timestamp:** Automatically searches for and selects the newest generated RPM/SRPM packages by file modification timestamp, ensuring older builds in `~/rpmbuild/RPMS/` are never mistakenly used.
+5. Perform automated verification tests:
    - Queries and validates RPM metadata (`rpm -qip`).
    - Verifies the file manifest for `/usr/bin/me_cleaner`, `/usr/bin/me_cleaner.py`, and man pages.
-   - Extracts the package to an isolated sandbox and executes `me_cleaner --version`, `me_cleaner.py --version`, and `me_cleaner --help`.
-   - Checks python3 shebang correctness.
-5. Display the path to the ready-to-install RPM and the installation command.
+   - Extracts the package to an isolated sandbox and checks python3 shebang correctness.
+   - Executes `me_cleaner --version`, `me_cleaner.py --version`, and `me_cleaner --help`.
+   - Tests error handling behavior on missing input files.
+6. Display the path to the ready-to-install RPM and the installation command.
 
 ### Available Options
 
@@ -70,13 +72,25 @@ This single command will:
 Usage: build.sh [OPTIONS]
 
 Options:
-  -r, --rpm          Build RPM package (default: true)
-  -w, --wheel        Build Python wheel package (default: false)
-  -t, --test         Run verification tests on built artifacts (default: true)
-  --no-test          Skip artifact verification tests
-  -c, --clean        Clean build directories and temporary files
-  -h, --help         Show this help message and exit
+  -r, --rpm              Build RPM package (default: true)
+      --no-rpm          Skip RPM package compilation
+  -w, --wheel            Build Python wheel package (default: false)
+  -t, --test             Run verification tests on built artifacts (default: true)
+      --no-test          Skip artifact verification tests
+  -o, --output-dir DIR   Copy built package artifacts to specified directory
+  -i, --install          Install the built RPM package on local system (requires sudo)
+  -c, --clean            Clean build directories and temporary files
+  -h, --help             Show this help message and exit
+
+Examples:
+  ./build.sh                               # Build RPM and run tests (standard)
+  ./build.sh --wheel                       # Build RPM and Python wheel
+  ./build.sh -o ./dist                     # Build RPM and copy to ./dist
+  ./build.sh -o ./dist --wheel             # Build RPM & wheel, copy to ./dist
+  ./build.sh --install                     # Build, test, and install RPM
+  ./build.sh --clean                       # Clean local build directories
 ```
+
 
 ---
 
