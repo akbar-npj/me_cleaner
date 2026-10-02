@@ -87,3 +87,8 @@ Various guides and tutorials are available on the Internet, however a good
 starting point is the ["How to apply me_cleaner" guide](
 https://github.com/corna/me_cleaner/wiki/How-to-apply-me_cleaner).
 
+## Building & Packaging
+
+For instructions on building, installing, and compiling RPM packages for Fedora, RHEL, CentOS, and Fedora Asahi Remix, please see the [Compilation and Packaging Guide](BUILD.md).
+
+
